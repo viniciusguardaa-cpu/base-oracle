@@ -689,9 +689,17 @@ def openapi_spec(pay_to, price_atomic):
                 'get': {'summary': 'FREE sample: latest Base block + gas price (no payment)', 'parameters': []}
             },
             TX_EXPLAIN_PATH: {
-                'get': {'summary': 'Explain a Base tx hash: status, value, fee, ERC-20 transfers', 'parameters': [
-                    {'name': 'tx', 'in': 'query', 'required': True, 'schema': {'type': 'string'}}
-                ]}
+                'get': {
+                    'summary': 'Paid Base transaction explainer',
+                    'description': 'Explain a Base tx hash: status, value, fee, ERC-20 transfers. Requires payment.',
+                    'parameters': [{'name': 'tx', 'in': 'query', 'required': True,
+                        'schema': {'type': 'string', 'pattern': '^0x[0-9a-fA-F]{64}$'}}],
+                    'x-payment-info': {'protocols': ['x402'],
+                        'price': {'mode': 'fixed', 'currency': 'USD', 'amount': '0.05'}, 'x402Version': 2,
+                        'payTo': pay_to, 'network': 'eip155:8453', 'asset': USDC_ASSET},
+                    'responses': {'200': {'description': 'Tx explanation JSON'},
+                                  '402': {'description': 'Payment required'}},
+                },
             },
             GAS_ORACLE_PATH: {
                 'get': {
