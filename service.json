@@ -1,0 +1,26 @@
+{
+  "name": "base-oracle",
+  "version": "1.6.0",
+  "description": "x402-paid Base chain oracle: wallet reports, token safety, gas oracle, tx explain, x402 audit. Pay 0.05 USDC on Base, get live on-chain data.",
+  "url": "https://arturo-epiphytical-torrie.ngrok-free.dev",
+  "network": "eip155:8453",
+  "scheme": "exact",
+  "asset": "USDC",
+  "payTo": "0x39EffA95A980a256AFDa156445F0e0f572801389",
+  "price_atomic": 50000,
+  "price_usdc": 0.05,
+  "endpoints": {
+    "free": ["/v1/sample", "/health"],
+    "paid": [
+      "/v1/wallet-report",
+      "/v1/token-safety",
+      "/v1/arb-scan",
+      "/v1/momentum",
+      "/v1/gas-oracle",
+      "/v1/x402-audit",
+      "/v1/funding",
+      "/v1/portfolio",
+      "/v1/tx-explain"
+    ]
+  }
+}
