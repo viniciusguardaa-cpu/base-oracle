@@ -37,3 +37,4 @@ Read-only service. Failed upstream fetches after payment return 502 and the
 payment is NOT consumed. Not financial advice.
 - `GET /v1/tx-explain?tx=0x...` -- explain any Base transaction: status, value, fee, ERC-20 transfers (0.05 USDC)
 - `GET /v1/prices?symbols=eth,btc` — spot prices USD+BRL, 24h change, market cap, 12 Base-ecosystem assets (0.05 USDC)
+- `/v1/balance?addr=0x...` — ETH + USDC balance, nonce and contract check for any Base address. $0.05 USDC.

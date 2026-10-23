@@ -25,7 +25,7 @@ from urllib.parse import urlparse, parse_qs
 
 import paychain
 
-PAID_ENDPOINTS = frozenset(['/v1/arb-scan', '/v1/funding', '/v1/gas-oracle', '/v1/momentum', '/v1/portfolio', '/v1/token-safety', '/v1/tx-explain', '/v1/wallet-report', '/v1/x402-audit', '/v1/contract-inspect', '/v1/prices'])
+PAID_ENDPOINTS = frozenset(['/v1/arb-scan', '/v1/funding', '/v1/gas-oracle', '/v1/momentum', '/v1/portfolio', '/v1/token-safety', '/v1/tx-explain', '/v1/wallet-report', '/v1/x402-audit', '/v1/contract-inspect', '/v1/prices', '/v1/token-meta', '/v1/base-snapshot', '/v1/fee-history', '/v1/balance'])
 
 USDC = paychain.USDC_BASE
 PAY_TO_DEFAULT = '0x39EffA95A980a256AFDa156445F0e0f572801389'
@@ -386,6 +386,10 @@ GAS_ORACLE_PATH = '/v1/gas-oracle'
 SAMPLE_PATH = '/v1/sample'
 TX_EXPLAIN_PATH = '/v1/tx-explain'
 CONTRACT_INSPECT_PATH = '/v1/contract-inspect'
+TOKEN_META_PATH = '/v1/token-meta'
+BASE_SNAPSHOT_PATH = '/v1/base-snapshot'
+FEE_HISTORY_PATH = '/v1/fee-history'
+BALANCE_PATH = '/v1/balance'
 
 def _http_json(url, opener=None, timeout=20, method='GET', payload=None, headers=None):
     import urllib.request, json as _j
@@ -575,6 +579,26 @@ def fetch_contract_inspect(addr):
     import contract_inspect
     return contract_inspect.inspect(addr)
 
+def fetch_token_meta(token):
+    import token_meta
+    return token_meta.fetch_token_meta(token)
+
+def fetch_base_snapshot():
+    import base_snapshot
+    return base_snapshot.fetch_snapshot()
+
+def fetch_fee_history(blocks):
+    import fee_history
+    try:
+        n = int(blocks) if str(blocks).isdigit() else 20
+    except Exception:
+        n = 20
+    return fee_history.fetch_fee_history(n)
+
+def fetch_balance_ep(addr):
+    import balance
+    return balance.fetch_balance(addr)
+
 def fetch_prices(symbols):
     import price_oracle
     syms = [s.strip().lower() for s in (symbols or '').split(',') if s.strip()]
@@ -613,10 +637,13 @@ _PAID_BODY_PARAMS = {
     '/v1/portfolio': ('address', '^0x[0-9a-fA-F]{40}$'),
     '/v1/tx-explain': ('tx', '^0x[0-9a-fA-F]{64}$'),
     '/v1/contract-inspect': ('address', '^0x[0-9a-fA-F]{40}$'),
+    '/v1/token-meta': ('token', '^0x[0-9a-fA-F]{40}$'),
     '/v1/prices': ('symbols', '^[a-z0-9,]{0,120}$'),
     '/v1/funding': ('symbol', '^[A-Za-z0-9]{1,20}$'),
     '/v1/x402-audit': ('url', '^https?://'),
     '/v1/gas-oracle': None,
+    '/v1/fee-history': ('blocks', '^[0-9]{0,3}$'),
+    '/v1/balance': ('addr', '^0x[0-9a-fA-F]{40}$'),
 }
 
 def openapi_spec(pay_to, price_atomic):
@@ -750,6 +777,19 @@ def _openapi_spec_inner(pay_to, price_atomic):
                                   '402': {'description': 'Payment required'}},
                 },
             },
+            TOKEN_META_PATH: {
+                'get': {
+                    'summary': 'Paid ERC-20 metadata',
+                    'description': 'ERC-20 metadata for a Base token contract: name, symbol, decimals, totalSupply (raw and normalized). Read-only eth_call/getCode via public RPC. Requires payment.',
+                    'parameters': [{'name': 'token', 'in': 'query', 'required': True,
+                        'schema': {'type': 'string', 'pattern': '^0x[0-9a-fA-F]{40}$'}}],
+                    'x-payment-info': {'protocols': ['x402'],
+                        'price': {'mode': 'fixed', 'currency': 'USD', 'amount': '0.05'}, 'x402Version': 2,
+                        'payTo': pay_to, 'network': 'eip155:8453', 'asset': USDC_ASSET},
+                    'responses': {'200': {'description': 'Token metadata JSON'},
+                                  '402': {'description': 'Payment required'}},
+                },
+            },
             TX_EXPLAIN_PATH: {
                 'get': {
                     'summary': 'Paid Base transaction explainer',
@@ -760,6 +800,31 @@ def _openapi_spec_inner(pay_to, price_atomic):
                         'price': {'mode': 'fixed', 'currency': 'USD', 'amount': '0.05'}, 'x402Version': 2,
                         'payTo': pay_to, 'network': 'eip155:8453', 'asset': USDC_ASSET},
                     'responses': {'200': {'description': 'Tx explanation JSON'},
+                                  '402': {'description': 'Payment required'}},
+                },
+            },
+            FEE_HISTORY_PATH: {
+                'get': {
+                    'summary': 'Paid Base fee history',
+                    'description': 'eth_feeHistory on Base: base fee stats (latest/next/min/max/mean gwei), median priority tip, gas used ratio over N recent blocks (optional ?blocks=1..128). Requires payment.',
+                    'parameters': [{'name': 'blocks', 'in': 'query', 'required': False,
+                        'schema': {'type': 'string', 'pattern': '^[0-9]{0,3}$'}}],
+                    'x-payment-info': {'protocols': ['x402'],
+                        'price': {'mode': 'fixed', 'currency': 'USD', 'amount': '0.05'}, 'x402Version': 2,
+                        'payTo': pay_to, 'network': 'eip155:8453', 'asset': USDC_ASSET},
+                    'responses': {'200': {'description': 'Fee history JSON'},
+                                  '402': {'description': 'Payment required'}},
+                },
+            },
+            BASE_SNAPSHOT_PATH: {
+                'get': {
+                    'summary': 'Paid Base chain snapshot',
+                    'description': 'One-call Base fundamentals: latest block, block time, gas used/limit, base fee, live gas price, USDC total supply. Read-only public RPC. Requires payment.',
+                    'parameters': [],
+                    'x-payment-info': {'protocols': ['x402'],
+                        'price': {'mode': 'fixed', 'currency': 'USD', 'amount': '0.05'}, 'x402Version': 2,
+                        'payTo': pay_to, 'network': 'eip155:8453', 'asset': USDC_ASSET},
+                    'responses': {'200': {'description': 'Base snapshot JSON'},
                                   '402': {'description': 'Payment required'}},
                 },
             },
@@ -820,12 +885,15 @@ PAID_BODY_SCHEMAS = {
     WALLET_REPORT_PATH if 'WALLET_REPORT_PATH' in dir() else RESOURCE_PATH: ('address', '^0x[0-9a-fA-F]{40}$'),
     TX_EXPLAIN_PATH: ('tx', '^0x[0-9a-fA-F]{64}$'),
     CONTRACT_INSPECT_PATH: ('address', '^0x[0-9a-fA-F]{40}$'),
+    TOKEN_META_PATH: ('token', '^0x[0-9a-fA-F]{40}$'),
     FUNDING_PATH: ('symbol', '^[A-Za-z0-9_-]{1,20}$'),
     X402_AUDIT_PATH: ('url', '^https?://'),
     GAS_ORACLE_PATH: (None, None),
+    BASE_SNAPSHOT_PATH: (None, None),
+    FEE_HISTORY_PATH: ('blocks', '^[0-9]{0,3}$'),
 }
 
-def _openapi_spec_inner(pay_to, price_atomic):
+def openapi_spec(pay_to, price_atomic):
     spec = _openapi_spec_inner(pay_to, price_atomic)
     for path, (field, pattern) in PAID_BODY_SCHEMAS.items():
         item = spec['paths'].get(path)
@@ -915,7 +983,8 @@ def _make_handler(pay_to, price_atomic, ledger_path):
                 res = [public_base() + p for p in
                        (SAMPLE_PATH, TX_EXPLAIN_PATH, RESOURCE_PATH, TOKEN_SAFETY_PATH, ARB_SCAN_PATH,
                         MOMENTUM_PATH, FUNDING_PATH, PORTFOLIO_PATH,
-                        X402_AUDIT_PATH, GAS_ORACLE_PATH, CONTRACT_INSPECT_PATH)]
+                        X402_AUDIT_PATH, GAS_ORACLE_PATH, CONTRACT_INSPECT_PATH, TOKEN_META_PATH,
+                        BASE_SNAPSHOT_PATH, FEE_HISTORY_PATH)]
                 return self._send(200, {'version': 1, 'resources': res})
             if u.path == '/openapi.json':
                 return self._send(200, openapi_spec(pay_to, price_atomic))
@@ -955,9 +1024,24 @@ def _make_handler(pay_to, price_atomic, ledger_path):
             if u.path == CONTRACT_INSPECT_PATH:
                 addr = (q.get('address') or [''])[0]
                 return self._paid(addr, txh, fetch_contract_inspect)
+            if u.path == TOKEN_META_PATH:
+                token = (q.get('token') or q.get('address') or [''])[0]
+                return self._paid('0x0000000000000000000000000000000000000000',
+                                  txh, lambda _a: fetch_token_meta(token))
             if u.path == '/v1/prices':
                 qs = dict(__import__('urllib.parse', fromlist=['parse_qsl']).parse_qsl(u.query))
                 return self._paid('0x0000000000000000000000000000000000000000', txh, lambda _a: fetch_prices(qs.get('symbols','')))
+            if u.path == BASE_SNAPSHOT_PATH:
+                return self._paid('0x0000000000000000000000000000000000000000',
+                                  txh, lambda _a: fetch_base_snapshot())
+            if u.path == BALANCE_PATH:
+                blk = (q.get('addr') or ['20'])[0]
+                return self._paid('0x0000000000000000000000000000000000000000',
+                                  txh, lambda _a: fetch_fee_history(blk))
+            if u.path == FEE_HISTORY_PATH:
+                blk = (q.get('blocks') or ['20'])[0]
+                return self._paid('0x0000000000000000000000000000000000000000',
+                                  txh, lambda _a: fetch_fee_history(blk))
             if u.path == TX_EXPLAIN_PATH:
                 return self._paid('0x0000000000000000000000000000000000000000', '', lambda _a=None: fetch_tx_explain((q.get('tx') or [''])[0]))
             if u.path == GAS_ORACLE_PATH:
