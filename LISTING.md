@@ -1,6 +1,6 @@
 # base-oracle — x402-paid trading-intelligence API on Base mainnet
 
-Live, hosted API for agents. One FREE endpoint (/v1/sample) + eight paid endpoints, each 0.05 USDC per call,
+Live, hosted API for agents. One FREE endpoint (/v1/sample) + ten paid endpoints, each 0.05 USDC per call,
 settled in USDC on Base (eip155:8453) via the x402 `exact` scheme. No account,
 no API key, no facilitator — payment is verified directly on-chain by receipt,
 and each transaction hash pays exactly once (anti-replay ledger).
@@ -22,6 +22,7 @@ and each transaction hash pays exactly once (anti-replay ledger).
 | `GET /v1/portfolio?address=0x…` | Portfolio composition for a Base address |
 | `GET /v1/x402-audit?target=https://…` | Audit any x402 seller: discovery doc, OpenAPI, 402 challenges, scheme/network/payTo/amount |
 | `GET /v1/gas-oracle` | Live Base gas: gasPrice, 20-block base-fee trend, suggested EIP-1559 maxFee/maxPriorityFee |
+| `GET /v1/contract-inspect?address=0x…` | Contract inspector: bytecode size, ERC-20 metadata, owner(), ERC-165 interfaces (721/1155/2981) |
 
 ## How to pay
 
@@ -35,3 +36,4 @@ and each transaction hash pays exactly once (anti-replay ledger).
 Read-only service. Failed upstream fetches after payment return 502 and the
 payment is NOT consumed. Not financial advice.
 - `GET /v1/tx-explain?tx=0x...` -- explain any Base transaction: status, value, fee, ERC-20 transfers (0.05 USDC)
+- `GET /v1/prices?symbols=eth,btc` — spot prices USD+BRL, 24h change, market cap, 12 Base-ecosystem assets (0.05 USDC)

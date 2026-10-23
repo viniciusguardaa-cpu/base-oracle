@@ -25,7 +25,7 @@ from urllib.parse import urlparse, parse_qs
 
 import paychain
 
-PAID_ENDPOINTS = frozenset(['/v1/arb-scan', '/v1/funding', '/v1/gas-oracle', '/v1/momentum', '/v1/portfolio', '/v1/token-safety', '/v1/tx-explain', '/v1/wallet-report', '/v1/x402-audit'])
+PAID_ENDPOINTS = frozenset(['/v1/arb-scan', '/v1/funding', '/v1/gas-oracle', '/v1/momentum', '/v1/portfolio', '/v1/token-safety', '/v1/tx-explain', '/v1/wallet-report', '/v1/x402-audit', '/v1/contract-inspect', '/v1/prices'])
 
 USDC = paychain.USDC_BASE
 PAY_TO_DEFAULT = '0x39EffA95A980a256AFDa156445F0e0f572801389'
@@ -385,6 +385,7 @@ X402_AUDIT_PATH = '/v1/x402-audit'
 GAS_ORACLE_PATH = '/v1/gas-oracle'
 SAMPLE_PATH = '/v1/sample'
 TX_EXPLAIN_PATH = '/v1/tx-explain'
+CONTRACT_INSPECT_PATH = '/v1/contract-inspect'
 
 def _http_json(url, opener=None, timeout=20, method='GET', payload=None, headers=None):
     import urllib.request, json as _j
@@ -570,6 +571,15 @@ def fetch_x402_audit(url):
     return rep
 
 
+def fetch_contract_inspect(addr):
+    import contract_inspect
+    return contract_inspect.inspect(addr)
+
+def fetch_prices(symbols):
+    import price_oracle
+    syms = [s.strip().lower() for s in (symbols or '').split(',') if s.strip()]
+    return price_oracle.price_report(syms or None)
+
 def fetch_tx_explain(txh):
     import tx_explain
     return tx_explain.explain_tx(txh)
@@ -593,7 +603,46 @@ def fetch_gas_oracle():
     return rep
 
 
+
+# post-schema-fixed: declare POST + requestBody on every paid /v1/* path
+_PAID_BODY_PARAMS = {
+    '/v1/wallet-report': ('address', '^0x[0-9a-fA-F]{40}$'),
+    '/v1/token-safety': ('address', '^0x[0-9a-fA-F]{40}$'),
+    '/v1/arb-scan': ('address', '^0x[0-9a-fA-F]{40}$'),
+    '/v1/momentum': ('address', '^0x[0-9a-fA-F]{40}$'),
+    '/v1/portfolio': ('address', '^0x[0-9a-fA-F]{40}$'),
+    '/v1/tx-explain': ('tx', '^0x[0-9a-fA-F]{64}$'),
+    '/v1/contract-inspect': ('address', '^0x[0-9a-fA-F]{40}$'),
+    '/v1/prices': ('symbols', '^[a-z0-9,]{0,120}$'),
+    '/v1/funding': ('symbol', '^[A-Za-z0-9]{1,20}$'),
+    '/v1/x402-audit': ('url', '^https?://'),
+    '/v1/gas-oracle': None,
+}
+
 def openapi_spec(pay_to, price_atomic):
+    spec = _openapi_spec_inner(pay_to, price_atomic)
+    for path, param in _PAID_BODY_PARAMS.items():
+        item = spec.get('paths', {}).get(path)
+        if not item:
+            continue
+        if param is None:
+            schema = {'type': 'object', 'properties': {}}
+        else:
+            name, pattern = param
+            schema = {'type': 'object',
+                      'properties': {name: {'type': 'string', 'pattern': pattern}},
+                      'required': [name]}
+        get_op = item.get('get', {})
+        item['post'] = {
+            'summary': get_op.get('summary', path),
+            'requestBody': {'required': True,
+                            'content': {'application/json': {'schema': schema}}},
+            'responses': get_op.get('responses', {'200': {'description': 'ok'},
+                                                  '402': {'description': 'Payment Required'}}),
+        }
+    return spec
+
+def _openapi_spec_inner(pay_to, price_atomic):
     base = public_base()
     return {
         'openapi': '3.0.3',
@@ -688,6 +737,19 @@ def openapi_spec(pay_to, price_atomic):
             SAMPLE_PATH: {
                 'get': {'summary': 'FREE sample: latest Base block + gas price (no payment)', 'parameters': []}
             },
+            CONTRACT_INSPECT_PATH: {
+                'get': {
+                    'summary': 'Paid contract inspector',
+                    'description': 'Inspect a Base address: bytecode size, ERC-20 metadata (name/symbol/decimals/totalSupply), owner(), ERC-165 interface probes (ERC-721/1155/2981), kind classification. Read-only eth_call/getCode via public RPC. Requires payment.',
+                    'parameters': [{'name': 'address', 'in': 'query', 'required': True,
+                        'schema': {'type': 'string', 'pattern': '^0x[0-9a-fA-F]{40}$'}}],
+                    'x-payment-info': {'protocols': ['x402'],
+                        'price': {'mode': 'fixed', 'currency': 'USD', 'amount': '0.05'}, 'x402Version': 2,
+                        'payTo': pay_to, 'network': 'eip155:8453', 'asset': USDC_ASSET},
+                    'responses': {'200': {'description': 'Contract inspection JSON'},
+                                  '402': {'description': 'Payment required'}},
+                },
+            },
             TX_EXPLAIN_PATH: {
                 'get': {
                     'summary': 'Paid Base transaction explainer',
@@ -750,6 +812,42 @@ def openapi_spec(pay_to, price_atomic):
         },
     }
 
+PAID_BODY_SCHEMAS = {
+    TOKEN_SAFETY_PATH: ('address', '^0x[0-9a-fA-F]{40}$'),
+    ARB_SCAN_PATH: ('address', '^0x[0-9a-fA-F]{40}$'),
+    MOMENTUM_PATH: ('address', '^0x[0-9a-fA-F]{40}$'),
+    PORTFOLIO_PATH: ('address', '^0x[0-9a-fA-F]{40}$'),
+    WALLET_REPORT_PATH if 'WALLET_REPORT_PATH' in dir() else RESOURCE_PATH: ('address', '^0x[0-9a-fA-F]{40}$'),
+    TX_EXPLAIN_PATH: ('tx', '^0x[0-9a-fA-F]{64}$'),
+    CONTRACT_INSPECT_PATH: ('address', '^0x[0-9a-fA-F]{40}$'),
+    FUNDING_PATH: ('symbol', '^[A-Za-z0-9_-]{1,20}$'),
+    X402_AUDIT_PATH: ('url', '^https?://'),
+    GAS_ORACLE_PATH: (None, None),
+}
+
+def _openapi_spec_inner(pay_to, price_atomic):
+    spec = _openapi_spec_inner(pay_to, price_atomic)
+    for path, (field, pattern) in PAID_BODY_SCHEMAS.items():
+        item = spec['paths'].get(path)
+        if not item or 'post' in item:
+            continue
+        get_op = item.get('get', {})
+        props = {}
+        required = []
+        if field:
+            props[field] = {'type': 'string'}
+            if pattern:
+                props[field]['pattern'] = pattern
+            required = [field]
+        item['post'] = {
+            'summary': get_op.get('summary', ''),
+            'requestBody': {'required': True, 'content': {'application/json': {
+                'schema': {'type': 'object', 'properties': props, 'required': required}}}},
+            'x-payment-info': get_op.get('x-payment-info'),
+            'responses': get_op.get('responses', {'200': {'description': 'Paid result'}}),
+        }
+        item['post'] = {k: v for k, v in item['post'].items() if v is not None}
+    return spec
 def _make_handler(pay_to, price_atomic, ledger_path):
     class H(BaseHTTPRequestHandler):
         server_version = 'base-oracle/1.0'
@@ -817,7 +915,7 @@ def _make_handler(pay_to, price_atomic, ledger_path):
                 res = [public_base() + p for p in
                        (SAMPLE_PATH, TX_EXPLAIN_PATH, RESOURCE_PATH, TOKEN_SAFETY_PATH, ARB_SCAN_PATH,
                         MOMENTUM_PATH, FUNDING_PATH, PORTFOLIO_PATH,
-                        X402_AUDIT_PATH, GAS_ORACLE_PATH)]
+                        X402_AUDIT_PATH, GAS_ORACLE_PATH, CONTRACT_INSPECT_PATH)]
                 return self._send(200, {'version': 1, 'resources': res})
             if u.path == '/openapi.json':
                 return self._send(200, openapi_spec(pay_to, price_atomic))
@@ -854,6 +952,12 @@ def _make_handler(pay_to, price_atomic, ledger_path):
                 tgt = (q.get('url') or [''])[0]
                 return self._paid('0x0000000000000000000000000000000000000000',
                                   txh, lambda _a: fetch_x402_audit(tgt))
+            if u.path == CONTRACT_INSPECT_PATH:
+                addr = (q.get('address') or [''])[0]
+                return self._paid(addr, txh, fetch_contract_inspect)
+            if u.path == '/v1/prices':
+                qs = dict(__import__('urllib.parse', fromlist=['parse_qsl']).parse_qsl(u.query))
+                return self._paid('0x0000000000000000000000000000000000000000', txh, lambda _a: fetch_prices(qs.get('symbols','')))
             if u.path == TX_EXPLAIN_PATH:
                 return self._paid('0x0000000000000000000000000000000000000000', '', lambda _a=None: fetch_tx_explain((q.get('tx') or [''])[0]))
             if u.path == GAS_ORACLE_PATH:
