@@ -25,7 +25,7 @@ from urllib.parse import urlparse, parse_qs
 
 import paychain
 
-PAID_ENDPOINTS = frozenset(['/v1/arb-scan', '/v1/funding', '/v1/gas-oracle', '/v1/momentum', '/v1/portfolio', '/v1/token-safety', '/v1/tx-explain', '/v1/wallet-report', '/v1/x402-audit', '/v1/contract-inspect', '/v1/prices', '/v1/token-meta', '/v1/base-snapshot', '/v1/fee-history', '/v1/balance'])
+PAID_ENDPOINTS = frozenset(['/v1/arb-scan', '/v1/funding', '/v1/gas-oracle', '/v1/momentum', '/v1/portfolio', '/v1/token-safety', '/v1/tx-explain', '/v1/wallet-report', '/v1/x402-audit', '/v1/contract-inspect', '/v1/prices', '/v1/token-meta', '/v1/base-snapshot', '/v1/fee-history', '/v1/balance', '/v1/tx-status', '/v1/contract-call'])
 
 USDC = paychain.USDC_BASE
 PAY_TO_DEFAULT = '0x39EffA95A980a256AFDa156445F0e0f572801389'
@@ -390,6 +390,8 @@ TOKEN_META_PATH = '/v1/token-meta'
 BASE_SNAPSHOT_PATH = '/v1/base-snapshot'
 FEE_HISTORY_PATH = '/v1/fee-history'
 BALANCE_PATH = '/v1/balance'
+TX_STATUS_PATH = '/v1/tx-status'
+CONTRACT_CALL_PATH = '/v1/contract-call'
 
 def _http_json(url, opener=None, timeout=20, method='GET', payload=None, headers=None):
     import urllib.request, json as _j
@@ -599,6 +601,14 @@ def fetch_balance_ep(addr):
     import balance
     return balance.fetch_balance(addr)
 
+def fetch_tx_status_ep(txh):
+    import tx_status
+    return tx_status.fetch_tx_status(txh)
+
+def fetch_contract_call_ep(to, data):
+    import contract_call
+    return contract_call.fetch_contract_call(to, data)
+
 def fetch_prices(symbols):
     import price_oracle
     syms = [s.strip().lower() for s in (symbols or '').split(',') if s.strip()]
@@ -644,6 +654,8 @@ _PAID_BODY_PARAMS = {
     '/v1/gas-oracle': None,
     '/v1/fee-history': ('blocks', '^[0-9]{0,3}$'),
     '/v1/balance': ('addr', '^0x[0-9a-fA-F]{40}$'),
+    '/v1/tx-status': ('tx', '^0x[0-9a-fA-F]{64}$'),
+    '/v1/contract-call': ('to', '^0x[0-9a-fA-F]{40}$'),
 }
 
 def openapi_spec(pay_to, price_atomic):
@@ -800,6 +812,36 @@ def _openapi_spec_inner(pay_to, price_atomic):
                         'price': {'mode': 'fixed', 'currency': 'USD', 'amount': '0.05'}, 'x402Version': 2,
                         'payTo': pay_to, 'network': 'eip155:8453', 'asset': USDC_ASSET},
                     'responses': {'200': {'description': 'Tx explanation JSON'},
+                                  '402': {'description': 'Payment required'}},
+                },
+            },
+            TX_STATUS_PATH: {
+                'get': {
+                    'summary': 'Paid Base transaction explainer',
+                    'description': 'Explain a Base tx hash: status, value, fee, ERC-20 transfers. Requires payment.',
+                    'parameters': [{'name': 'tx', 'in': 'query', 'required': True,
+                        'schema': {'type': 'string', 'pattern': '^0x[0-9a-fA-F]{64}$'}}],
+                    'x-payment-info': {'protocols': ['x402'],
+                        'price': {'mode': 'fixed', 'currency': 'USD', 'amount': '0.05'}, 'x402Version': 2,
+                        'payTo': pay_to, 'network': 'eip155:8453', 'asset': USDC_ASSET},
+                    'responses': {'200': {'description': 'Tx status report JSON'},
+                                  '402': {'description': 'Payment required'}},
+                },
+            },
+            CONTRACT_CALL_PATH: {
+                'get': {
+                    'summary': 'Paid generic read-only eth_call',
+                    'description': 'Proxy a read-only eth_call to any Base contract: pass to (address) and data (0x calldata). Returns raw hex plus UTF-8/uint256 decode. Never sends transactions. Requires payment.',
+                    'parameters': [
+                        {'name': 'to', 'in': 'query', 'required': True,
+                         'schema': {'type': 'string', 'pattern': '^0x[0-9a-fA-F]{40}$'}},
+                        {'name': 'data', 'in': 'query', 'required': True,
+                         'schema': {'type': 'string', 'pattern': '^0x[0-9a-fA-F]*$'}},
+                    ],
+                    'x-payment-info': {'protocols': ['x402'],
+                        'price': {'mode': 'fixed', 'currency': 'USD', 'amount': '0.05'}, 'x402Version': 2,
+                        'payTo': pay_to, 'network': 'eip155:8453', 'asset': USDC_ASSET},
+                    'responses': {'200': {'description': 'eth_call result JSON'},
                                   '402': {'description': 'Payment required'}},
                 },
             },
@@ -984,7 +1026,7 @@ def _make_handler(pay_to, price_atomic, ledger_path):
                        (SAMPLE_PATH, TX_EXPLAIN_PATH, RESOURCE_PATH, TOKEN_SAFETY_PATH, ARB_SCAN_PATH,
                         MOMENTUM_PATH, FUNDING_PATH, PORTFOLIO_PATH,
                         X402_AUDIT_PATH, GAS_ORACLE_PATH, CONTRACT_INSPECT_PATH, TOKEN_META_PATH,
-                        BASE_SNAPSHOT_PATH, FEE_HISTORY_PATH)]
+                        BASE_SNAPSHOT_PATH, FEE_HISTORY_PATH, TX_STATUS_PATH, CONTRACT_CALL_PATH)]
                 return self._send(200, {'version': 1, 'resources': res})
             if u.path == '/openapi.json':
                 return self._send(200, openapi_spec(pay_to, price_atomic))
@@ -1035,9 +1077,18 @@ def _make_handler(pay_to, price_atomic, ledger_path):
                 return self._paid('0x0000000000000000000000000000000000000000',
                                   txh, lambda _a: fetch_base_snapshot())
             if u.path == BALANCE_PATH:
-                blk = (q.get('addr') or ['20'])[0]
+                addr = (q.get('addr') or [''])[0]
                 return self._paid('0x0000000000000000000000000000000000000000',
-                                  txh, lambda _a: fetch_fee_history(blk))
+                                  txh, lambda _a: fetch_balance_ep(addr))
+            if u.path == TX_STATUS_PATH:
+                txarg = (q.get('tx') or [''])[0]
+                return self._paid('0x0000000000000000000000000000000000000000',
+                                  txh, lambda _a: fetch_tx_status_ep(txarg))
+            if u.path == CONTRACT_CALL_PATH:
+                to = (q.get('to') or [''])[0]
+                data = (q.get('data') or [''])[0]
+                return self._paid('0x0000000000000000000000000000000000000000',
+                                  txh, lambda _a: fetch_contract_call_ep(to, data))
             if u.path == FEE_HISTORY_PATH:
                 blk = (q.get('blocks') or ['20'])[0]
                 return self._paid('0x0000000000000000000000000000000000000000',
